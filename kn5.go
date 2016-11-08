@@ -92,21 +92,49 @@ func (mpu *MPU9250) Config() error {
 		return e
 	}
 
-	v |= ^byte(PARAM_ACCEL_FS_16G) //set 1 bits 4:3
+	v |= byte(PARAM_ACCEL_FS_16G) //has bits 4:3 set to 1
 	switch mpu.accel_fs {
 	case 2:
-		v &= ^byte(PARAM_ACCEL_FS_2G)
+		v &= byte(PARAM_ACCEL_FS_2G)
 	case 4:
-		v &= ^byte(PARAM_ACCEL_FS_4G)
+		v &= byte(PARAM_ACCEL_FS_4G)
 	case 8:
-		v &= ^byte(PARAM_ACCEL_FS_8G)
+		v &= byte(PARAM_ACCEL_FS_8G)
 	case 16:
-		v &= ^byte(PARAM_ACCEL_FS_16G)
+		v &= byte(PARAM_ACCEL_FS_16G)
 	default:
-		v &= ^byte(PARAM_ACCEL_FS_2G)
+		v &= byte(PARAM_ACCEL_FS_2G)
 	}
 
 	e = mpu.i2c.WriteRegU8(REG_ACCEL_CONFIG, v)
+	if e != nil {
+		return e
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	// config gyro
+
+	v, e = mpu.i2c.ReadRegU8(REG_GYRO_CONFIG)
+	if e != nil {
+		return e
+	}
+
+	v |= byte(PARAM_GYRO_FS_2000) //has bits 4:3 set to 1
+	switch mpu.gyro_fs {
+	case 2:
+		v &= byte(PARAM_GYRO_FS_250)
+	case 4:
+		v &= byte(PARAM_GYRO_FS_500)
+	case 8:
+		v &= byte(PARAM_GYRO_FS_1000)
+	case 16:
+		v &= byte(PARAM_GYRO_FS_2000)
+	default:
+		v &= byte(PARAM_GYRO_FS_250)
+	}
+
+	e = mpu.i2c.WriteRegU8(REG_GYRO_CONFIG, v)
 	if e != nil {
 		return e
 	}
@@ -256,49 +284,93 @@ func main() {
 
 	//var creation out of the loop
 	var (
-		ax uint16
-		ay uint16
-		az uint16
-		gx uint16
-		gy uint16
-		gz uint16
+		ax   uint16
+		ay   uint16
+		az   uint16
+		gx   uint16
+		gy   uint16
+		gz   uint16
+		accx int16
+		accy int16
+		accz int16
+		gyrx int16
+		gyry int16
+		gyrz int16
 	)
 	buf := make([]byte, 14) //to store 14 bytes
 	time0 := time.Now()
-	//for i := 0; i < 100; i++ {
-	for {
+	for i := 0; i < 1000; i++ {
 		//ax, ay, az, gx, gy, gz := mpu.GetData()
 		//ax, ay, az, gx, gy, gz := mpu.GetAllData()
 		//read the acc and gyro data in one step without err consideration
 		_, _ = mpu.i2c.Write([]byte{REG_ACCEL_XOUT_H})
 		_, _ = mpu.i2c.Read(buf)
 		ax = uint16(buf[0])<<8 | uint16(buf[1])
+		if ax > 32767 {
+			ax = ^ax + 0x01
+			accx = -1 * int16(ax)
+		} else {
+			accx = int16(ax)
+		}
+
 		ay = uint16(buf[2])<<8 | uint16(buf[3])
+		if ay > 32767 {
+			ay = ^ay + 0x01
+			accy = -1 * int16(ay)
+		} else {
+			accy = int16(ay)
+		}
+
 		az = uint16(buf[4])<<8 | uint16(buf[5])
-		//temp  = int(uint16(buf[6]<<8) + uint16(buf[7]))
+		if az > 32767 {
+			az = ^az + 0x01
+			accz = -1 * int16(az)
+		} else {
+			accz = int16(az)
+		}
+
 		gx = uint16(buf[8])<<8 | uint16(buf[9])
+		if gx > 32767 {
+			gx = ^gx + 0x01
+			gyrx = -1 * int16(gx)
+		} else {
+			gyrx = int16(gx)
+		}
+
 		gy = uint16(buf[10])<<8 | uint16(buf[11])
+		if gy > 32767 {
+			gy = ^gy + 0x01
+			gyry = -1 * int16(gy)
+		} else {
+			gyry = int16(gy)
+		}
+
 		gz = uint16(buf[12])<<8 | uint16(buf[13])
+		if gz > 32767 {
+			gz = ^gz + 0x01
+			gyrz = -1 * int16(gz)
+		} else {
+			gyrz = int16(gz)
+		}
 
-		//TODO hacer la conversion a con signo de unsigned
-		//TODO hacer la conversion a con signo de unsigned
-		//TODO hacer la conversion a con signo de unsigned
-		//TODO hacer la conversion a con signo de unsigned
-		//TODO hacer la conversion a con signo de unsigned
+		//fmt.Printf("[%d]; %d; %d; %d; %d; %d; %d\n",
+		//	time.Now().Sub(time0)/time.Millisecond,
+		//	accx, accy, accz, gyrx, gyry, gyrz)
 
-		fmt.Printf("[%d]; %d; %d; %d; %d; %d; %d\n",
-			time.Now().Sub(time0)/time.Millisecond,
-			ax, ay, az, gx, gy, gz)
 		/*
 			fmt.Printf("[%d]; %f; %f; %f; %f; %f; %f\n",
 				time.Now().Sub(time0)/time.Millisecond,
-				float64(ax)/16384.0,
-				float64(ay)/16384.0,
-				float64(az)/16384.0,
-				float64(gx)/131.0,
-				float64(gy)/131.0,
-				float64(gz)/131.0)
+				float64(accx)/16384.0,
+				float64(accy)/16384.0,
+				float64(accz)/16384.0,
+				float64(gyrx)/131.0,
+				float64(gyry)/131.0,
+				float64(gyrz)/131.0)
 		*/
 
 	}
+	time1 := time.Now()
+	fmt.Printf("[%d]; %d; %d; %d; %d; %d; %d\n",
+		time1.Sub(time0)/time.Millisecond,
+		accx, accy, accz, gyrx, gyry, gyrz)
 }
