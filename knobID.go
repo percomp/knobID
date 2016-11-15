@@ -385,8 +385,13 @@ func main() {
 		os.Mkdir(dataFilePath, 0666)
 	}
 
+	const (
+		PIN_LED int = 4
+		PIN_IR  int = 17
+	)
+
 	//led
-	led, err := gpio.OpenPin(4, gpio.OUT)
+	led, err := gpio.OpenPin(PIN_LED, gpio.OUT)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -395,7 +400,7 @@ func main() {
 
 	//ir
 	//open the pin in the GPIO
-	ir, err := gpio.OpenPin(17, gpio.IN)
+	ir, err := gpio.OpenPin(PIN_IR, gpio.IN)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -433,6 +438,8 @@ func main() {
 	buf := make([]byte, 14) //to store 14 bytes
 	time0 := time.Now()
 	//i := 0
+
+	//gorutine detec presence at IR and set led
 	go readIR(ir, led, presence)
 
 	for presenceNow := range presence {
@@ -535,8 +542,8 @@ func main() {
 				headLine = headLine + fmt.Sprintf("# %v Data Acquisition\n", time.Now())
 				headLine = headLine + fmt.Sprintf("# Acquisition name: %s\n", acquisitionName)
 				headLine = headLine + fmt.Sprintf("# Acquisition num: %d\n", acquisitionNum)
-				headLine = headLine + fmt.Sprintf("# Accelerometer full scale: %d\n", accFS)
-				headLine = headLine + fmt.Sprintf("# Gyroscope full scale: %d\n", gyrFS)
+				headLine = headLine + fmt.Sprintf("# Accelerometer full scale: %d (%f)\n", accFS, accFSMAX)
+				headLine = headLine + fmt.Sprintf("# Gyroscope full scale: %d (%f)\n", gyrFS, gyrFSMAX)
 				headLine = headLine + "##########\n"
 				headLine = headLine + fmt.Sprintf("num; time(us); accX(g); accY(g); accZ(g); gyrX(o/s); gyrY(o/s); gyrZ(o/s)\n")
 				dataFile.WriteString(headLine) //write headding line in the file
@@ -568,9 +575,5 @@ func main() {
 		presenceBefore = presenceNow
 
 	}
-
-	//time1 := time.Now()
-	//fmt.Printf("[%d]; %d; %d; %d; %d; %d; %d\n",
-	//		time1.Sub(time0)/time.Millisecond,
-	//		accx, accy, accz, gyrx, gyry, gyrz)
+	//END
 }
