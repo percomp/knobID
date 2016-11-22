@@ -132,6 +132,7 @@ func NewMPU9250(devAddress int, a_fs int, g_fs int) (*MPU9250, error) {
 
 // ConfigAcc Config the accelerometer Full Scale
 func (mpu *MPU9250) Config() error {
+	log.Printf("Configuration parameters:")
 	// config accel
 	v, e := mpu.i2c.ReadRegU8(REG_ACCEL_CONFIG)
 	if e != nil {
@@ -151,8 +152,29 @@ func (mpu *MPU9250) Config() error {
 	default:
 		v &= byte(PARAM_ACCEL_FS_2G)
 	}
+	log.Printf("\tACCEL_FS: %#x", byte(v))
 
 	e = mpu.i2c.WriteRegU8(REG_ACCEL_CONFIG, v)
+	if e != nil {
+		return e
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	//Setup acc data rates to maximun avoiding DLPF
+	v, e = mpu.i2c.ReadRegU8(REG_ACCEL_CONFIG_2)
+	if e != nil {
+		return e
+	}
+
+	//log.Printf("v before: %b", v)
+	v |= byte(PARAM_ACCEL_FCHOICE_b) //has bits 4 set to 1
+	log.Printf("\tACCEL_FCHOICE_B: %#x", byte(v))
+	//log.Printf("FCHOICE_B %b", byte(0x00))
+	//v = byte(0x00) //has bits 4 set to 1
+	//log.Printf("v after: %b", v)
+
+	e = mpu.i2c.WriteRegU8(REG_ACCEL_CONFIG_2, v)
 	if e != nil {
 		return e
 	}
@@ -168,18 +190,19 @@ func (mpu *MPU9250) Config() error {
 
 	v |= byte(PARAM_GYRO_FS_2000) //has bits 4:3 set to 1
 	switch mpu.gyro_fs {
-	case 2:
+	case 250:
 		v &= byte(PARAM_GYRO_FS_250)
-	case 4:
+	case 500:
 		v &= byte(PARAM_GYRO_FS_500)
-	case 8:
+	case 1000:
 		v &= byte(PARAM_GYRO_FS_1000)
-	case 16:
+	case 2000:
 		v &= byte(PARAM_GYRO_FS_2000)
 	default:
 		v &= byte(PARAM_GYRO_FS_250)
 	}
 
+	log.Printf("\tGYRO_FS: %#x", byte(v))
 	e = mpu.i2c.WriteRegU8(REG_GYRO_CONFIG, v)
 	if e != nil {
 		return e
@@ -383,6 +406,7 @@ func main() {
 	dataFilePath = filepath.Join(".", dataDirectory)
 	if _, err := os.Stat(dataFilePath); os.IsNotExist(err) {
 		os.Mkdir(dataFilePath, 0666)
+		log.Printf("Data dir created.")
 	}
 
 	const (
@@ -448,7 +472,7 @@ func main() {
 			if !presenceBefore { //begin a capture
 				log.Println("Presence detected, begin acquisition")
 				time0 = time.Now() //reset time of measures
-				acquisitionNum++   //increase the num of acquisitions
+				//acquisitionNum++   //increase the num of acquisitions
 				//i = 0              //log purposes
 			}
 			//read the acc and gyro data in one step without err consideration
@@ -521,9 +545,13 @@ func main() {
 			if presenceBefore { //end of a capture, dump data
 				log.Println("Absence detected, stop acquisition")
 				log.Printf("Data store size: %d (of %d)", len(dataStore), cap(dataStore))
+				//log.Printf("Tim[0]: %d", int(dataStore[0].Tim/time.Microsecond))
+				//log.Printf("Tim[%d]: %d", len(dataStore)-1, int(dataStore[len(dataStore)-1].Tim/time.Microsecond))
+				log.Printf("Data acquisition rate: %d Hz", int(1000000.0*float32(len(dataStore))/float32(dataStore[len(dataStore)-1].Tim/time.Microsecond)))
 				//dump the dataStore on the slice into a file
 				//Create and open file
 				dataFileName = fmt.Sprintf("%s%d%s", filepath.Join(dataFilePath, acquisitionName), acquisitionNum, DATAFILE_EXTENSION)
+				acquisitionNum++ //increase num of acquisitions for the next time
 				//Create and Close if not exists
 				if _, err := os.Stat(dataFileName); os.IsNotExist(err) {
 					log.Printf("Creating %s\n", dataFileName)
