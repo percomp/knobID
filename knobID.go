@@ -1,3 +1,4 @@
+// knobID sensor platform to study the knob use microaction
 // derived from d2r2, hathan-osman and mrmorphic
 
 package main
@@ -79,6 +80,12 @@ type ThreeDData struct {
 	Z int16
 }
 
+type preTimAccGyr struct {
+	Tim time.Time
+	Acc ThreeDData //X, Y, Z  int16
+	Gyr ThreeDData //X, Y, Z  int16
+}
+
 type TimAccGyr struct {
 	Tim time.Duration
 	Acc ThreeDData //X, Y, Z  int16
@@ -87,6 +94,7 @@ type TimAccGyr struct {
 
 const (
 	DATA_CAP           int    = 1000 //DATA_CAP initial capacity of slice Data
+	PRE_DATA_CAP       int    = 1000 //PRE_DATA_CAP initial capacity of circular array of prefechted Data
 	DATAFILE_EXTENSION string = ".csv"
 )
 
@@ -334,7 +342,7 @@ func main() {
 
 	//environment data
 	var (
-		//Data slice with raw data readed from mpu sensor
+		//Data slices with raw data readed from mpu sensor
 		dataStore       = make([]TimAccGyr, 0, DATA_CAP)
 		dataFile        *os.File
 		dataFilePath    string
@@ -342,9 +350,13 @@ func main() {
 		acquisitionName string
 		acquisitionNum  int
 		dataDirectory   string
+		preThisData     preTimAccGyr
 		thisData        TimAccGyr
 		presenceBefore  bool
 		presence        = make(chan bool)
+		firstValue      int
+		lastValue       int
+		preValue        preTimAccGyr
 	)
 
 	acquisitionNum = 0 //increased each infrared sensor (ir) activation
@@ -357,11 +369,13 @@ func main() {
 	var accFSMAX float64
 	var gyrFS int
 	var gyrFSMAX float64
+	var margin int
 
 	flag.StringVar(&nameArg, "name", "event", "Name of the acquisition")
 	flag.StringVar(&dirArg, "dir", "data", "Directory where store acquisitions")
 	flag.IntVar(&accFS, "acc", 2, "Accelerometer full scale g (2, 4, 8, 16)")
 	flag.IntVar(&gyrFS, "gyro", 250, "Gyroscope full scale dps (250, 500, 1000, 20000)")
+	flag.IntVar(&margin, "marg", 250, fmt.Sprintf("Margin of data to acquire (< %d)", PRE_DATA_CAP))
 
 	flag.Parse()
 
@@ -370,7 +384,19 @@ func main() {
 	log.Printf("\t Dir: %s", dirArg)
 	log.Printf("\t Acc: %d", accFS)
 	log.Printf("\t Gyro: %d", gyrFS)
+	log.Printf("\t Marg: %d", margin)
 
+	if margin < 0 {
+		margin = 0
+		log.Printf("Margin negative!, set to 0: %d", margin)
+	}
+
+	if margin > PRE_DATA_CAP {
+		margin = PRE_DATA_CAP
+		log.Printf("Margin too big, set to the maximun available: %d", margin)
+	}
+
+	preDataStore := make([]preTimAccGyr, margin)
 	//set the vars regarding the args
 	acquisitionName = nameArg
 	dataDirectory = dirArg
@@ -411,7 +437,7 @@ func main() {
 
 	const (
 		PIN_LED int = 4
-		PIN_IR  int = 17
+		PIN_IR  int = 22 //17
 	)
 
 	//led
@@ -543,6 +569,77 @@ func main() {
 
 		} else {
 			if presenceBefore { //end of a capture, dump data
+				//post margin acquisition
+				for i := 0; i < margin; i++ {
+					//here the acquistion margin post
+					//read the acc and gyro data in one step without err consideration
+					_, _ = mpu.i2c.Write([]byte{REG_ACCEL_XOUT_H})
+					_, _ = mpu.i2c.Read(buf)
+					//time of readdings
+					thisData.Tim = time.Now().Sub(time0)
+					log.Printf("post margin %d ", thisData.Tim/time.Microsecond)
+					//data of readdings
+					ax = uint16(buf[0])<<8 | uint16(buf[1])
+					if ax > 32767 {
+						ax = ^ax + 0x01
+						thisData.Acc.X = -1 * int16(ax)
+					} else {
+						thisData.Acc.X = int16(ax)
+					}
+
+					ay = uint16(buf[2])<<8 | uint16(buf[3])
+					if ay > 32767 {
+						ay = ^ay + 0x01
+						thisData.Acc.Y = -1 * int16(ay)
+					} else {
+						thisData.Acc.Y = int16(ay)
+					}
+
+					az = uint16(buf[4])<<8 | uint16(buf[5])
+					if az > 32767 {
+						az = ^az + 0x01
+						thisData.Acc.Z = -1 * int16(az)
+					} else {
+						thisData.Acc.Z = int16(az)
+					}
+
+					gx = uint16(buf[8])<<8 | uint16(buf[9])
+					if gx > 32767 {
+						gx = ^gx + 0x01
+						thisData.Gyr.X = -1 * int16(gx)
+					} else {
+						thisData.Gyr.X = int16(gx)
+					}
+
+					gy = uint16(buf[10])<<8 | uint16(buf[11])
+					if gy > 32767 {
+						gy = ^gy + 0x01
+						thisData.Gyr.Y = -1 * int16(gy)
+					} else {
+						thisData.Gyr.Y = int16(gy)
+					}
+
+					gz = uint16(buf[12])<<8 | uint16(buf[13])
+					if gz > 32767 {
+						gz = ^gz + 0x01
+						thisData.Gyr.Z = -1 * int16(gz)
+					} else {
+						thisData.Gyr.Z = int16(gz)
+					}
+
+					//log.Printf("[%d]; %d; %f; %f; %f; %f; %f; %f\n",
+					//	i,
+					//	time.Now().Sub(time0)/time.Millisecond,
+					//	float64(thisData.Acc.X)/16384.0,
+					//	float64(thisData.Acc.Y)/16384.0,
+					//	float64(thisData.Acc.Z)/16384.0,
+					//	float64(thisData.Gyr.X)/131.0,
+					//	float64(thisData.Gyr.Y)/131.0,
+					//	float64(thisData.Gyr.Z)/131.0)
+					//	i += 1
+					dataStore = append(dataStore, thisData)
+
+				}
 				log.Println("Absence detected, stop acquisition")
 				log.Printf("Data store size: %d (of %d)", len(dataStore), cap(dataStore))
 				//log.Printf("Tim[0]: %d", int(dataStore[0].Tim/time.Microsecond))
@@ -551,7 +648,6 @@ func main() {
 				//dump the dataStore on the slice into a file
 				//Create and open file
 				dataFileName = fmt.Sprintf("%s%d%s", filepath.Join(dataFilePath, acquisitionName), acquisitionNum, DATAFILE_EXTENSION)
-				acquisitionNum++ //increase num of acquisitions for the next time
 				//Create and Close if not exists
 				if _, err := os.Stat(dataFileName); os.IsNotExist(err) {
 					log.Printf("Creating %s\n", dataFileName)
@@ -570,12 +666,33 @@ func main() {
 				headLine = headLine + fmt.Sprintf("# %v Data Acquisition\n", time.Now())
 				headLine = headLine + fmt.Sprintf("# Acquisition name: %s\n", acquisitionName)
 				headLine = headLine + fmt.Sprintf("# Acquisition num: %d\n", acquisitionNum)
-				headLine = headLine + fmt.Sprintf("# Accelerometer full scale: %d (%f)\n", accFS, accFSMAX)
-				headLine = headLine + fmt.Sprintf("# Gyroscope full scale: %d (%f)\n", gyrFS, gyrFSMAX)
+				headLine = headLine + fmt.Sprintf("# Accelerometer full scale: %d (%d)\n", accFS, int(accFSMAX))
+				headLine = headLine + fmt.Sprintf("# Gyroscope full scale: %d (%d)\n", gyrFS, int(gyrFSMAX))
 				headLine = headLine + "##########\n"
 				headLine = headLine + fmt.Sprintf("num; time(us); accX(g); accY(g); accZ(g); gyrX(o/s); gyrY(o/s); gyrZ(o/s)\n")
 				dataFile.WriteString(headLine) //write headding line in the file
-				//write data to the file
+				if margin > 0 {
+					firstValue = (lastValue + 1) % margin
+					log.Printf("margin: %d, firstValue: %d, lastValue: %d", margin, firstValue, lastValue)
+					for i := 1; i <= margin; i++ {
+						led.Toggle() //indicate transferring state with led
+						preValue = preDataStore[firstValue]
+						firstValue = (firstValue + 1) % margin
+						dataString := fmt.Sprintf("%d;%d;%f;%f;%f;%f;%f;%f\n",
+							i,
+							int64(preValue.Tim.Sub(time0)/time.Microsecond),
+							float64(preValue.Acc.X)/accFSMAX,
+							float64(preValue.Acc.Y)/accFSMAX,
+							float64(preValue.Acc.Z)/accFSMAX,
+							float64(preValue.Gyr.X)/gyrFSMAX,
+							float64(preValue.Gyr.Y)/gyrFSMAX,
+							float64(preValue.Gyr.Z)/gyrFSMAX)
+						dataFile.WriteString(dataString) //write data in the file
+
+					}
+					dataFile.WriteString("======================================================\n")
+				}
+				//write dataStore to the file
 				for i, value := range dataStore {
 					led.Toggle() //indicate transferring state with led
 					dataString := fmt.Sprintf("%d;%d;%f;%f;%f;%f;%f;%f\n",
@@ -593,15 +710,78 @@ func main() {
 				dataFile.Close()
 				log.Printf("Closed %s\n", dataFileName)
 
-				//initialize the slice to prepare it for new data
+				acquisitionNum++ //increase num of acquisitions for the next time
+				//initialize the slices to prepare it for new data
+				preDataStore = make([]preTimAccGyr, PRE_DATA_CAP)
+				lastValue = -1
 				dataStore = make([]TimAccGyr, 0, DATA_CAP)
 				//log.Printf("New data store size: %d (of %d)", len(dataStore), cap(dataStore))
 				log.Printf("Ready for new acquisition....")
 
+			} else { //while no presence detected prefech data and store in prebuf[]
+
+				if margin > 0 {
+					//read the acc and gyro data in one step without err consideration
+					_, _ = mpu.i2c.Write([]byte{REG_ACCEL_XOUT_H})
+					_, _ = mpu.i2c.Read(buf)
+					//time of readdings
+					preThisData.Tim = time.Now() //TODO .Sub(time0) substract time0 when dump to the file
+					//data of readdings
+					ax = uint16(buf[0])<<8 | uint16(buf[1])
+					if ax > 32767 {
+						ax = ^ax + 0x01
+						preThisData.Acc.X = -1 * int16(ax)
+					} else {
+						preThisData.Acc.X = int16(ax)
+					}
+
+					ay = uint16(buf[2])<<8 | uint16(buf[3])
+					if ay > 32767 {
+						ay = ^ay + 0x01
+						preThisData.Acc.Y = -1 * int16(ay)
+					} else {
+						preThisData.Acc.Y = int16(ay)
+					}
+
+					az = uint16(buf[4])<<8 | uint16(buf[5])
+					if az > 32767 {
+						az = ^az + 0x01
+						preThisData.Acc.Z = -1 * int16(az)
+					} else {
+						preThisData.Acc.Z = int16(az)
+					}
+
+					gx = uint16(buf[8])<<8 | uint16(buf[9])
+					if gx > 32767 {
+						gx = ^gx + 0x01
+						preThisData.Gyr.X = -1 * int16(gx)
+					} else {
+						preThisData.Gyr.X = int16(gx)
+					}
+
+					gy = uint16(buf[10])<<8 | uint16(buf[11])
+					if gy > 32767 {
+						gy = ^gy + 0x01
+						preThisData.Gyr.Y = -1 * int16(gy)
+					} else {
+						preThisData.Gyr.Y = int16(gy)
+					}
+
+					gz = uint16(buf[12])<<8 | uint16(buf[13])
+					if gz > 32767 {
+						gz = ^gz + 0x01
+						preThisData.Gyr.Z = -1 * int16(gz)
+					} else {
+						preThisData.Gyr.Z = int16(gz)
+					}
+
+					lastValue = (lastValue + 1) % margin
+					log.Printf("lastValue: %d", lastValue)
+					preDataStore[lastValue] = preThisData
+				}
 			}
 		}
 		presenceBefore = presenceNow
-
 	}
 	//END
 }
